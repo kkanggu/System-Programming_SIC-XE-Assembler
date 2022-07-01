@@ -24,6 +24,11 @@ static int g_siLine_count ;
 
 /*
  * Convert assembly line to token
+ * Add byte and displacement variable to separate process
+ * At former version, need to process to save into file
+ * So add these variable, and separate process and saving
+ * If connect to GUI simulator, then can connect and send JSON format
+ * Then make connect & JSON conversion function instead saving function
  */
 typedef struct token_unit
 {
@@ -31,6 +36,9 @@ typedef struct token_unit
 	char * m_cpOperator ;
 	char * m_cpOperand [ MAX_OPERAND ] ;
 	char m_cNixbpe ;
+	int m_iByte ;
+	int m_iDispacement ;		// Base relative, then 0 <= disp <= 4095
+								// PC relative, then -2048 <= disp <= 2047
 } token ;
 token * g_pToken_table [ MAX_LINES ] ;
 static int g_iToken_count ;
@@ -42,6 +50,7 @@ typedef struct symbol_unit
 {
 	char * m_cpSymbol ;
 	int m_iAddr ;
+	int m_iByte ;
 } symbol ;
 symbol * g_Symbol_table [ MAX_LINES ] ;
 static int g_iSymbol_count ;
@@ -60,13 +69,14 @@ static int g_iSymbol_count ;
 typedef struct literal_unit {
 	char * m_cpLiteral ;
 	int m_iAddr ;
+	int m_iByte ;
 } USER_Literal ;		// literal keyword exist
 USER_Literal * g_Literal_table [ MAX_LINES ] ;
 static int g_iLiteral_count ;
 
 static int g_iLocctr ;
 
-static int g_irgProgramLengthforEach [ MAX_SECTION	] ;	// Program length of each section | routine
+static int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
 static int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
 static char g_cdrgRegiter [ 9 ] [ 3 ] = { "A" , "X" , "L" , "B" , "S" , "T" , "F" , "PC" , "SW" } ;
@@ -84,8 +94,7 @@ typedef struct extref_unit
 } extref ;
 extref * g_Extref_table [ 100 ] ;
 static int g_iExtref_count ;
-// char * g_cprgExtrefList [ 10 ] ;				// User defined variable. Save string of EXTREF at current section
-// static int g_iExtrefPointCount ;				// User defined variable. Count EXTREF at current section
+
 
 int init_assembler ( void ) ;
 int init_inst_table ( char * cpInst_file ) ;
@@ -93,9 +102,11 @@ int init_input_file ( char * cpInput_file ) ;
 int token_parsing ( char * cpStr ) ;
 int search_opcode ( char * cpStr ) ;
 int assem_pass1 () ;
+int iSetByteOfToken () ;
 int iSetSymbolLiteralInfo () ;
 int iSetAddrNixbpeInfo () ;
-void make_objectcode_output ( char * cpFile_name ) ;
+void tempSetSomething ( char * cpFile_name ) ;
+int iPrintObjectCode ( char * cpFile_name ) ;
 
 int iStringToHex ( char * cpStr ) ;				// Change string to hex
 char cHexToChar ( const int ciNum ) ;			// Change hex to char
