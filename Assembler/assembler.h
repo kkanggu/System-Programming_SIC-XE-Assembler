@@ -20,7 +20,7 @@ int g_iInst_count ;
  * Assembly line info
  */
 char * g_cpInput_data [ MAX_LINES ] ;
-static int g_siLine_count ;
+int g_iLine_count ;
 
 /*
  * Convert assembly line to token
@@ -37,11 +37,11 @@ typedef struct token_unit
 	char * m_cpOperand [ MAX_OPERAND ] ;
 	char m_cNixbpe ;
 	int m_iByte ;
-	int m_iDispacement ;		// Base relative, then 0 <= disp <= 4095
+	int m_iDisplacement ;		// Base relative, then 0 <= disp <= 4095
 								// PC relative, then -2048 <= disp <= 2047
 } token ;
 token * g_pToken_table [ MAX_LINES ] ;
-static int g_iToken_count ;
+int g_iToken_count ;
 
 /*
  * Symbol info
@@ -53,7 +53,7 @@ typedef struct symbol_unit
 	int m_iByte ;
 } symbol ;
 symbol * g_Symbol_table [ MAX_LINES ] ;
-static int g_iSymbol_count ;
+int g_iSymbol_count ;
 					// Symbol과 Literal이 가지는 것은 같고 개념이 비슷하긴 해서 묶는 방법도 있음
 					// 근데 이거를 합치면 두개 처리를 할 때 하나씩 체크해야 하는게 좀 많이 귀찮음
 					// 그래서 이거를 합치는게 맞을까? 아니면 지금처럼 분리하는게 맞는건가?
@@ -72,14 +72,14 @@ typedef struct literal_unit {
 	int m_iByte ;
 } USER_Literal ;		// literal keyword exist
 USER_Literal * g_Literal_table [ MAX_LINES ] ;
-static int g_iLiteral_count ;
+int g_iLiteral_count ;
 
-static int g_iLocctr ;
+int g_iLocctr ;
 
-static int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
-static int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
+int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
+int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
-static char g_cdrgRegiter [ 9 ] [ 3 ] = { "A" , "X" , "L" , "B" , "S" , "T" , "F" , "PC" , "SW" } ;
+char g_cdrgRegiter [ 9 ] [ 3 ] = { "A" , "X" , "L" , "B" , "S" , "T" , "F" , "PC" , "SW" } ;
 												// Register name to check
 
 /*
@@ -93,7 +93,7 @@ typedef struct extref_unit
 	char m_cSign ;
 } extref ;
 extref * g_Extref_table [ 100 ] ;
-static int g_iExtref_count ;
+int g_iExtref_count ;
 
 
 int init_assembler ( void ) ;
@@ -105,7 +105,7 @@ int assem_pass1 () ;
 int iSetByteOfToken () ;
 int iSetSymbolLiteralInfo () ;
 int iSetAddrNixbpeInfo () ;
-void tempSetSomething ( char * cpFile_name ) ;
+void tempSetSomething () ;
 int iPrintObjectCode ( char * cpFile_name ) ;
 
 int iStringToHex ( char * cpStr ) ;				// Change string to hex

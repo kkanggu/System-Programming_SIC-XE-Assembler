@@ -25,19 +25,11 @@ int main ( int args , char * arg [] )
 		return -1 ;
 	}
 
-	if ( iSetSymbolLiteralInfo () < 0 )
+	if ( assem_pass2 () < 0 )
 	{
-		printf ( "iSetSymbolLiteralInfo : Failed to process symbol and literal info.\n" ) ;
+		printf ( "assem_pass2 : Failed to procedd pass 2.\n" ) ;
 		return -1 ;
 	}
-
- 	if ( iSetAddrNixbpeInfo () < 0 )
-	{
-		printf ( "assem_pass2 : Failed to procedd pass 1.\n" ) ;
-		return -1 ;
-	}
-
-	tempSetSomething ( "Object_Program" ) ;
 
 	clearMemory () ;
 
@@ -116,7 +108,7 @@ int init_inst_table ( char * cpInst_file )
 int init_input_file ( char * cpInput_file )
 {
 	FILE * file ;
-	int iCount = 0 ;
+	g_iLine_count = 0 ;
 	char str [ MAX_INST ] = "\0 , " ;
 
 
@@ -130,16 +122,16 @@ int init_input_file ( char * cpInput_file )
 
 	while ( fgets ( str , MAX_INST , file )	)					// Read operator name
 	{
-		g_cpInput_data [ iCount ] = malloc ( strlen ( str ) + 1 ) ;
-		strcpy ( g_cpInput_data [ iCount ] , str ) ;
+		g_cpInput_data [ g_iLine_count ] = malloc ( strlen ( str ) + 1 ) ;
+		strcpy ( g_cpInput_data [ g_iLine_count ] , str ) ;
 
-		++ iCount ;
+		++ g_iLine_count ;
 	}
 
 
-	if ( iCount != MAX_LINES - 1 )
+	if ( g_iLine_count != MAX_LINES - 1 )
 	{
-		g_cpInput_data [ iCount ] = NULL ;
+		g_cpInput_data [ g_iLine_count ] = NULL ;
 	}
 
 	fclose ( file ) ;
@@ -155,13 +147,14 @@ int init_input_file ( char * cpInput_file )
  */
 int assem_pass1 ()
 {
+	int i = 0 ;
 	g_iToken_count = 0 ;
 
 
 
-	while ( ( g_iToken_count < MAX_LINES ) && ( NULL != g_cpInput_data [ g_iToken_count ] ) )			// While input left
+	for ( i = 0 ; ( i < g_iLine_count ) && ( g_iToken_count < MAX_LINES ) ; ++i )
 	{
-		if ( token_parsing ( g_cpInput_data [ g_iToken_count ] ) < 0 )		// Proceed token parsing with checking error
+		if ( token_parsing ( g_cpInput_data [ i ] ) < 0 )		// Proceed token parsing with checking error
 		{
 			printf ( "assem_pass1 : Parsing failed.\n" ) ;
 			
@@ -207,7 +200,7 @@ int token_parsing ( char * cpStr )
 	g_pToken_table [ g_iToken_count ] -> m_cpOperator = NULL ;
 	g_pToken_table [ g_iToken_count ] -> m_cpOperand [ 0 ] = NULL ;
 	g_pToken_table [ g_iToken_count ] -> m_iByte = -1 ;
-	g_pToken_table [ g_iToken_count ] -> m_iDispacement = 0 ;
+	g_pToken_table [ g_iToken_count ] -> m_iDisplacement = 0 ;
 
 	cpTemp = strtok ( cpStr , "\t \n" ) ;
 
@@ -272,6 +265,13 @@ int assem_pass2 ()
 		return -1 ;
 	}
 
+	// 2형식, 4형식 싹다 고쳐야 함
+	// + RDREC에서 6번 add, LDT MAXTREN도 이상함
+	// + 추가적으로 Literal들에 section 변수를 추가해줘야 LTORG 처리가 가능함
+	// Literal assign은 그냥 지역변수로 카운트 하면서 그 카운트부터 LTORG addr까지 쭉 체크하는 방식으로 하면 될 듯
+
+	tempSetSomething () ;
+
 	return 0 ;
 }
 
@@ -296,7 +296,7 @@ int iSetByteOfToken ()
 		{
 			g_pToken_table [ i ] -> m_iByte = 4 ;
 		}
-		else if ( 0 < iOpcode )										// Format 1,2,3
+		else if ( 0 <= iOpcode )										// Format 1,2,3
 		{
 			g_pToken_table [ i ] -> m_iByte = iGetOperandByte ( iOpcode ) ;
 		}
@@ -344,8 +344,10 @@ int iSetSymbolLiteralInfo ()
 
 	for ( ; i < g_iToken_count ; ++i )
 	{
-		cpTemp = g_pToken_table [ i ] -> m_cpLabel ;
+		if ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "CSECT" ) )			// New section, initialize locctr to 0
+			g_iLocctr = 0 ;
 
+		cpTemp = g_pToken_table [ i ] -> m_cpLabel ;
 
 		if ( NULL != cpTemp )					// Label exist, add to symbol table
 		{
@@ -356,7 +358,8 @@ int iSetSymbolLiteralInfo ()
 			g_Symbol_table [ g_iSymbol_count ] -> m_iByte = g_pToken_table [ i ] -> m_iByte ;
 
 
-			if ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "EQU" ) )							// If EQU found, need to process
+			if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "EQU" ) )
+				&& ( 0 != strcmp ( "*" , g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ) )				// If EQU found, need to process
 			{
 				iLen = 0 ;
 
@@ -402,12 +405,9 @@ int iSetSymbolLiteralInfo ()
 
 		cpTemp = g_pToken_table [ i ] -> m_cpOperator ;
 
-		g_iLocctr += g_pToken_table [ i ] -> m_iByte ;	// Why???????????????
+		g_iLocctr += g_pToken_table [ i ] -> m_iByte ;
 
-		if ( 0 == strcmp ( cpTemp , "CSECT" ) )			// New section, initialize locctr to 0
-			g_iLocctr = 0 ;
-
-
+		
 		if ( ( 0 == strcmp ( cpTemp , "CSECT" ) ) || ( 0 == strcmp ( cpTemp , "LTORG" ) ) )		// If CSECT or LTORG found, assign memory to unassigned literals
 		{
 			for ( j = 0 ; j < g_iLiteral_count ; ++j )
@@ -418,7 +418,7 @@ int iSetSymbolLiteralInfo ()
 					{
 						iByte = 1 ;
 					}
-					else if ( '=' == g_Literal_table [ j ] -> m_cpLiteral [ 1 ] )				// =C'ASDF'
+					else if ( '=' == g_Literal_table [ j ] -> m_cpLiteral [ 0 ] )				// =C'ASDF'
 					{
 						iByte = strlen ( g_Literal_table [ j ] -> m_cpLiteral ) - 4 ;
 					}
@@ -580,7 +580,7 @@ int iSetAddrNixbpeInfo ()
 
 				if ( -1 == iLocation )
 				{
-					printf ( "iSetAddrNixbpeInfo : Can't find literal" ) ;
+					printf ( "iSetAddrNixbpeInfo : Can't find literal\n" ) ;
 
 					return -1 ;
 				}
@@ -607,9 +607,12 @@ int iSetAddrNixbpeInfo ()
 
 				if ( -1 == iLocation )
 				{
-					printf ( "iSetAddrNixbpeInfo : Can't find symbol" ) ;
+					iLocation = atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 1 ) ;
 
-					return -1 ;
+
+					// printf ( "iSetAddrNixbpeInfo : Can't find symbol\n" ) ;
+					// 
+					// return -1 ;
 				}
 			}
 
@@ -626,7 +629,7 @@ int iSetAddrNixbpeInfo ()
 					   && ( iLocation - g_iLocctr <= 2047 ) )						// If pc relative is possible
 			{
 				g_pToken_table [ i ] -> m_cNixbpe |= 0b000010 ;
-				g_pToken_table [ i ] -> m_iDispacement = iLocation - g_iLocctr ;
+				g_pToken_table [ i ] -> m_iDisplacement = iLocation - g_iLocctr ;
 			}
 			else																	// We already filtered format 4 extension
 			{																		// So if exceed condition failed, then base relative is the only way
@@ -642,28 +645,30 @@ int iSetAddrNixbpeInfo ()
 				&& ( 0 == strcmp ( "X" , g_pToken_table [ i ] -> m_cpOperand [ j ] ) ) )
 			{
 				g_pToken_table [ i ] -> m_cNixbpe |= 0b001000 ;
+
+				continue ;
 			}
+
+			break ;			// If find break, then NULL. Don't have to check
 		}
 	}
 
-	iTemp = 10 ;											// From here, can't understand. CHECK THIS
+	iTemp = 0 ;
 	for ( i = 0 ; i < iSection + 1 ; ++i )
 	{
 		iTemp += g_irgLiteralCountforEach [ i ] ;
 	}
-	if ( iTemp != iTotalLiteralCount )																// Literal address is not computed
+	for ( i = iTemp ; i < iTotalLiteralCount ; ++i )	// If literal address is not computed, then proceed for loop
 	{
 		iByte = 1 ;
 
-		if ( 'C' == g_Literal_table [ iTotalLiteralCount - 1 ] -> m_cpLiteral [ 1 ] )
+		if ( 'C' == g_Literal_table [ i ] -> m_cpLiteral [ 1 ] )
 		{
-			iByte = strlen ( g_Literal_table [ iTotalLiteralCount - 1 ] -> m_cpLiteral - 4 ) ;
+			iByte = strlen ( g_Literal_table [ i ] -> m_cpLiteral - 4 ) ;
 		}
 
-		g_iLocctr = g_Literal_table [ iTotalLiteralCount - 1 ] -> m_iAddr + iByte ;
+		g_iLocctr = g_Literal_table [ i ] -> m_iAddr + iByte ;
 	}
-
-	// TO HERE. BELOW is ok
 
 	if ( -1 == iSection )
 	{
@@ -783,215 +788,9 @@ void tempSetSomething ()
 //
 //				iByte = 0 ;
 //			}
-			// FROM HERE
+			
 			if ( 0 < iByte )
 			{
-				iImmediate = 0 ;
-
-				cpTemp = g_pToken_table [ i ] -> m_cpOperand [ 0 ] ;
-
-				if ( ( NULL != cpTemp )																	// For # and @
-					&&		( ( '#' == cpTemp [ 0 ] )
-							|| ( '@' == cpTemp [ 0 ] ) ) )
-				{
-					if ( '#' == cpTemp [ 0 ] )
-						iImmediate = 1 ;
-					++ cpTemp ;
-				}
-
-
-				if ( 1 == iIndicator )																	// BYTE instruction
-				{
-					iByte = 1 ;
-
-					sprintf ( crgTemp , "%02X" , iStringToHex ( cpTemp + 2 ) ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-				else if ( 2 == iIndicator )																// WORD instruction
-				{
-					iByte = 3 ;
-					iWordLen = 0 ;
-					cSign = 1 ;
-					iAddress = 0 ;
-					k = 0 ;
-					iTemp = 0 ;
-
-					for ( k = 0 ; k < iSection ; ++k )
-					{
-						iTemp += g_irgLiteralCountforEach [ k ] ;
-					}
-					for ( j = 0 ; j < strlen ( cpTemp ) ; ++j )
-					{
-						if ( '-' == cpTemp [ j ] )
-						{
-							if ( 0 != j )
-							{
-								strncpy ( crgTemp , cpTemp + j - iWordLen , iWordLen ) ;
-								crgTemp [ iWordLen ] = '\0' ;
-																
-								for ( k = iTemp ; k < iTemp + g_irgLiteralCountforEach [ iSection ] ; ++k )	// Check if it reference variable of current section
-								{
-									if ( 0 == strcmp ( crgTemp , g_Literal_table [ i ] -> m_cpLiteral ) )
-									{
-										iAddress += g_Literal_table [ i ] -> m_iAddr * cSign ;
-										
-										break ;
-									}
-								}
-							}
-
-							cSign = -1 ;
-							iWordLen = 0 ;
-						}
-						else if ( '+' == cpTemp [ j ] )
-						{
-							if ( 0 != j )
-							{
-								strncpy ( crgTemp , cpTemp + j - iWordLen , iWordLen ) ;
-								crgTemp [ iWordLen ] = '\0' ;
-																
-								for ( k = iTemp ; k < iTemp + g_irgLiteralCountforEach [ iSection ] ; ++k )
-								{
-									if ( 0 == strcmp ( crgTemp , g_Literal_table [ i ] -> m_cpLiteral ) )
-									{
-										iAddress += g_Literal_table [ i ] -> m_iAddr * cSign ;
-										
-										break ;
-									}
-								}
-							}
-
-							cSign = 1 ;
-							iWordLen = 0 ;
-						}
-						else
-						{
-							++ iWordLen ;
-						}
-					}
-
-					sprintf ( crgTemp , "%06X" , iAddress ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-				else if ( 3 == iIndicator )																// LTORG instruction
-				{
-					for ( j = iLiteralProcessCount ; j < iLiteralProcessCount + g_irgLiteralCountforEach [ iSection ] ; ++j )
-					{
-						cpTemp = g_Literal_table [ j ] -> m_cpLiteral ;
-
-
-						if ( 'X' == cpTemp [ 1 ] )														// Current literal is byte
-						{
-							iByte = 1 ;
-						}
-						else																			// Current literal is word
-						{
-							iByte = strlen ( cpTemp ) - 4 ;
-						}
-						if ( 1 == iByte )
-						{
-							sprintf ( crgTemp , "%02X" , iStringToHex ( cpTemp + 3 ) ) ;
-							strcat ( crgPrint , crgTemp ) ;
-						}
-						else
-						{
-							for ( k = 0 ; k < iByte ; ++k )
-							{
-								sprintf ( crgTemp , "%02X" , cpTemp [ 3 + k ] ) ;
-								strcat ( crgPrint , crgTemp ) ;
-							}
-						}
-					}
-
-					iLiteralProcessCount += g_irgLiteralCountforEach [ iSection ] ;
-				}
-				else if ( 1 == iByte )
-				{
-					// Add here for 1 byte operand
-
-					sprintf ( crgTemp , "%02X" , iAddress ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-				else if ( 2 == iByte )
-				{
-					iAddress <<= 8 ;
-
-					for ( j = 0 ; j < 9 ; ++j )
-					{
-						if ( 0 == strcmp ( g_cdrgRegiter [ j ] , cpTemp ) )
-						{
-							if ( j >= 7 )																// If j >= 7, then j + 1 is register number
-							{
-								++j ;
-							}
-
-							iAddress += ( j << 4 ) ;
-
-							break ;
-						}
-					}
-					if ( ( 2 == iGetInstOperandNum ( search_opcode ( g_pToken_table [ i ] -> m_cpOperator ) ) )
-						&& ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 1 ] ) )								// If multiple operand
-					{
-						for ( j = 0 ; j < 9 ; ++j )
-						{
-							if ( 0 == strcmp ( g_cdrgRegiter [ j ] , g_pToken_table [ i ] -> m_cpOperand [ 1 ] ) )
-							{
-								if ( j >= 7 )															// If j >= 7, then j + 1 is register number
-								{
-									++j ;
-								}
-
-								iAddress += j ;
-
-								break ;
-							}
-						}
-					}
-
-					sprintf ( crgTemp , "%04X" , iAddress ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-				else if ( 3 == iByte )
-				{
-					iAddress <<= 16 ;
-					iAddress += ( ( int ) ( g_pToken_table [ i ] -> m_cNixbpe ) ) << 12 ;						// Cast to int and shift left
-
-					if ( 1 == iImmediate )
-					{
-						iAddress += atoi ( cpTemp ) ;
-					}
-					else if ( 0 != ( iAddress & 0x2000 ) )												// If pc relative
-					{
-						iTemp = iGetSymLocation ( cpTemp , iSection ) ;
-						if ( -1 == iTemp )
-						{
-							iTemp = iGetLitLocation ( cpTemp ) ;
-						}
-						iTemp -= g_iLocctr ;
-
-						iAddress |= ( iTemp & 0xFFF ) ;
-					}
-					else if ( 0 != ( iAddress & 0x4000 ) )												// If base relative
-					{
-						// Add here for base relative
-					}
-
-					sprintf ( crgTemp , "%06X" , iAddress ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-				else if ( 4 == iByte )
-				{
-					iAddress <<= 24 ;
-					iAddress += ( ( int ) ( g_pToken_table [ i ] -> m_cNixbpe ) ) << 20 ;						// Cast to int and shift left
-
-					cpTemp = g_pToken_table [ i ] -> m_cpOperand [ 0 ] ;
-
-					sprintf ( crgTemp , "%08X" , iAddress ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-
-
 				for ( j = 0 ; ( NULL != g_pToken_table [ i ] -> m_cpOperand [ j ] ) && ( j < 3 ) ; ++j )		// Check if EXTREF is used
 				{
 					cpTemp = g_pToken_table [ i ] -> m_cpOperand [ j ] ;
@@ -1099,82 +898,9 @@ void tempSetSomething ()
 						}
 					}
 				}
-				
-				iLineLength += iByte ;
-
-				crgPrint [ 7 ] = cHexToChar ( iLineLength >> 4 ) ;
-				crgPrint [ 8 ] = cHexToChar ( iLineLength & 0xF ) ;
 			}
 		}
 	}
-
-	if ( '\0' != crgPrint [ 0 ] )
-	{
-		for ( i = iLiteralProcessCount ; i < iLiteralProcessCount + g_irgLiteralCountforEach [ iSection ] ; ++i )
-		{																						// If literal not assigned
-			cpTemp = g_Literal_table [ i ] -> m_cpLiteral ;
-
-
-			if ( 'X' == cpTemp [ 1 ] )																	// Current literal is byte
-			{
-				iByte = 1 ;
-			}
-			else																						// Current literal is word
-			{
-				iByte = strlen ( cpTemp ) - 4 ;
-			}
-			if ( 1 == iByte )
-			{
-				sprintf ( crgTemp , "%02X" , iStringToHex ( cpTemp + 3 ) ) ;
-				strcat ( crgPrint , crgTemp ) ;
-			}
-			else
-			{
-				for ( k = 0 ; k < iByte ; ++k )
-				{
-					sprintf ( crgTemp , "%02X" , cpTemp [ 3 + k ] ) ;
-					strcat ( crgPrint , crgTemp ) ;
-				}
-			}
-		}
-
-		printToFileOrConsole ( file , crgPrint ) ;
-	}
-	for ( i = 0 ; i < g_iExtref_count ; ++i )														// If EXTREF is not modified
-	{
-		iAddress = g_Extref_table [ i ] -> m_iAddr ;
-		iByte = g_Extref_table [ i ] -> m_iHalf_byte ;
-
-		if ( 1 == ( iByte % 2 ) )
-		{
-			++ iAddress ;
-		}
-
-		sprintf ( crgPrint , "M%06X%02X" , iAddress , iByte ) ;
-
-		if ( 1 == g_Extref_table [ i ] -> m_cSign )
-		{
-			sprintf ( crgTemp , "+" ) ;
-		}
-		else
-		{
-			sprintf ( crgTemp , "-" ) ;
-		}
-		strcat ( crgPrint , crgTemp ) ;
-
-		sprintf ( crgTemp , "%s" , g_Extref_table [ i ] -> m_cpLiteral ) ;
-		strcat ( crgPrint , crgTemp ) ;
-
-		printToFileOrConsole ( file , crgPrint ) ;
-	}
-
-
-
-	sprintf ( crgPrint , "E" ) ;
-	printToFileOrConsole ( file , crgPrint ) ;
-
-	if ( NULL != file )
-		fclose ( file ) ;
 }
 
  /*
@@ -1206,7 +932,7 @@ void tempSetSomething ()
  */
 int search_opcode ( char * cpStr )
 {
-	int iCount = 0 ;
+	int i = 0 ;
 	char * cpTemp = cpStr ;
 
 
@@ -1216,14 +942,12 @@ int search_opcode ( char * cpStr )
 		++ cpTemp ;
 	}
 
-	while ( ( iCount < MAX_INST ) && ( NULL != g_pInst_table [ iCount ] ) )
+	for ( int i = 0 ; i < g_iInst_count ; ++i )
 	{
-		if ( 0 == strcmp ( cpTemp , g_pInst_table [ iCount ] ) )
+		if ( 0 == strcmp ( cpTemp , g_pInst_table [ i ] -> m_cpOperation ) )
 		{
-			return g_pInst_table [ iCount ] -> m_uiOpcode ;
+			return g_pInst_table [ i ] -> m_uiOpcode ;
 		}
-
-		++ iCount ;
 	}
 
 	return -1 ;								// Can't find opcode
@@ -1264,42 +988,51 @@ char cHexToChar ( const int ciNum )				// Change hex to char
 void clearMemory ()								// Free all the memory
 {
 	int iCount = 0 ;
+	int i = 0 ;
+	int j = 0 ;
 
 
-
-	while ( ( iCount < MAX_INST ) && ( NULL != g_pInst_table [ iCount ] ) )
+	for ( i = 0 ; ( i < MAX_INST ) && ( NULL != g_pInst_table [ i ] ) ; ++i )
 	{
+		free ( g_pInst_table [ iCount ] -> m_cpOperation ) ;
 		free ( g_pInst_table [ iCount ++ ] ) ;
 	}
 
-	iCount = 0 ;
-
-	while ( iCount < g_siLine_count )
+	for ( int i = 0 ; i < g_iLine_count ; ++i )
 	{
 		free ( g_cpInput_data [ iCount ++ ] ) ;
 	}
-
-	g_siLine_count = 0 ;
-	iCount = 0 ;
 	
-	while ( ( g_siLine_count < MAX_LINES ) && ( NULL != g_pToken_table [ g_iToken_count ] ) )
+	for ( i = 0 ; ( i < MAX_LINES ) && ( NULL != g_pToken_table [ i ] ) ; ++i )
 	{
-		if ( NULL != g_pToken_table [ g_iToken_count ] -> m_cpLabel )			// If label exist, free
+		if ( NULL != g_pToken_table [ i ] -> m_cpLabel )		// If label exist, free
 		{
-			free ( g_pToken_table [ g_iToken_count ] -> m_cpLabel ) ;
+			free ( g_pToken_table [ i ] -> m_cpLabel ) ;
 		}
-		if ( NULL != g_pToken_table [ g_iToken_count ] -> m_cpOperator )		// If operator exist, free
+		if ( NULL != g_pToken_table [ i ] -> m_cpOperator )		// If operator exist, free
 		{
-			free ( g_pToken_table [ g_iToken_count ] -> m_cpOperator ) ;
+			free ( g_pToken_table [ i ] -> m_cpOperator ) ;
 		}
-		while ( ( iCount != MAX_OPERAND ) && ( NULL != g_pToken_table [ g_iToken_count ] -> m_cpOperand [ iCount ] ) )			// If operand exist, free
+		for ( j = 0 ; ( j < MAX_OPERAND ) && ( NULL != g_pToken_table [ i ] -> m_cpOperand [ j ] ) ; ++j )			// If operand exist, free
 		{
-			free ( g_pToken_table [ g_iToken_count ] -> m_cpOperand [ iCount ++ ] ) ;
+			free ( g_pToken_table [ i ] -> m_cpOperand [ j ] ) ;
 		}
 
-		free ( g_pToken_table [ g_siLine_count ++ ] ) ;
+		free ( g_pToken_table [ i ] ) ;
 
 		iCount = 0 ;
+	}
+
+	for ( int i = 0 ; i < g_iSymbol_count ; ++i )
+	{
+		free ( g_Symbol_table [ i ] -> m_cpSymbol ) ;
+		free ( g_Symbol_table [ i ] ) ;
+	}
+
+	for ( int i = 0 ; i < g_iLiteral_count ; ++i )
+	{
+		free ( g_Literal_table [ i ] -> m_cpLiteral ) ;
+		free ( g_Literal_table [ i ] ) ;
 	}
 }
 
