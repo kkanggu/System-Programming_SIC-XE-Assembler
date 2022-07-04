@@ -51,6 +51,7 @@ typedef struct symbol_unit
 	char * m_cpSymbol ;
 	int m_iAddr ;
 	int m_iByte ;
+	int m_iSection ;
 } symbol ;
 symbol * g_Symbol_table [ MAX_LINES ] ;
 int g_iSymbol_count ;
@@ -79,8 +80,6 @@ int g_iLocctr ;
 int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
 int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
-char g_cdrgRegiter [ 9 ] [ 3 ] = { "A" , "X" , "L" , "B" , "S" , "T" , "F" , "PC" , "SW" } ;
-												// Register name to check
 
 /*
  * External reference info
@@ -95,6 +94,22 @@ typedef struct extref_unit
 extref * g_Extref_table [ 100 ] ;
 int g_iExtref_count ;
 
+/*
+ * Saves object code
+ * Former version, object code conversion & print is at one function
+ * Separate function to get scability
+ */
+typedef struct object_code_unit
+{
+	char * m_cpRecord ;				// Head, Extdef, Extref, Text, Modification, End
+	int m_iAddr ;
+	int m_iByte ;
+	char * m_cpSymbol ;
+	char m_cSign ;
+} object_code ;
+object_code * g_ObjectCode_table [ MAX_LINES ] ;
+int g_iObjectCode_count ;
+
 
 int init_assembler ( void ) ;
 int init_inst_table ( char * cpInst_file ) ;
@@ -105,7 +120,9 @@ int assem_pass1 () ;
 int iSetByteOfToken () ;
 int iSetSymbolLiteralInfo () ;
 int iSetAddrNixbpeInfo () ;
+int iSetDisplacement () ;
 void tempSetSomething () ;
+int iConvertToObjectCode () ;
 int iPrintObjectCode ( char * cpFile_name ) ;
 
 int iStringToHex ( char * cpStr ) ;				// Change string to hex
@@ -115,3 +132,4 @@ int iGetOperandByte ( const int ciOpcode ) ;	// Get operand size using opcode
 int iGetInstOperandNum ( const int ciOpcode ) ;	// Get number of instruction operand using opcode
 int iGetSymLocation ( char * cpStr ) ;
 int iGetLitLocation ( char * cpStr ) ;
+int iGetRegisterNum ( char * cpStr ) ;

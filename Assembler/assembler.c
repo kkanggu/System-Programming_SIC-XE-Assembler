@@ -264,11 +264,15 @@ int assem_pass2 ()
 		printf ( "iSetAddrNixbpeInfo : Setting address and nixbpe failed.\n" ) ;
 		return -1 ;
 	}
+	if ( ( iSetDisplacement () ) < 0 )		// Set displacement of tokens
+	{
+		printf ( "iSetDisplacement : Setting displacement failed.\n" ) ;
+		return -1 ;
+	}
 
-	// 2형식, 4형식 싹다 고쳐야 함
-	// + RDREC에서 6번 add, LDT MAXTREN도 이상함
-	// + 추가적으로 Literal들에 section 변수를 추가해줘야 LTORG 처리가 가능함
-	// Literal assign은 그냥 지역변수로 카운트 하면서 그 카운트부터 LTORG addr까지 쭉 체크하는 방식으로 하면 될 듯
+	// LTORG, 맨 마지막에 Literal 추가되는거 totable에 없으니 처리해야함
+	// output 만들때 modification 처리해야 함
+	// output 만드는 함수 하나, 이거를 내보내는 함수 하나로 분리하는게 나을 듯
 
 	tempSetSomething () ;
 
@@ -339,13 +343,17 @@ int iSetSymbolLiteralInfo ()
 	int j = 0 ;
 	char cSign = 1 ;		// If -1, it means -
 	int iLen = 0 ;
+	int iSection = 0 ;
 
 
 
 	for ( ; i < g_iToken_count ; ++i )
 	{
 		if ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "CSECT" ) )			// New section, initialize locctr to 0
+		{
 			g_iLocctr = 0 ;
+			++ iSection ;
+		}
 
 		cpTemp = g_pToken_table [ i ] -> m_cpLabel ;
 
@@ -356,6 +364,7 @@ int iSetSymbolLiteralInfo ()
 			strcpy ( g_Symbol_table [ g_iSymbol_count ] -> m_cpSymbol , cpTemp ) ;						// Copy label to symbol table
 			g_Symbol_table [ g_iSymbol_count ] -> m_iAddr = g_iLocctr ;
 			g_Symbol_table [ g_iSymbol_count ] -> m_iByte = g_pToken_table [ i ] -> m_iByte ;
+			g_Symbol_table [ g_iSymbol_count ] -> m_iSection = iSection ;
 
 
 			if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "EQU" ) )
@@ -488,6 +497,7 @@ int iSetSymbolLiteralInfo ()
 
 /*
  * Set address and nixbpe of each tokens
+ * ++ Set displacement of format 3 operation
  * Return 0 if success, - if fail
  */
 int iSetAddrNixbpeInfo ()
@@ -495,7 +505,7 @@ int iSetAddrNixbpeInfo ()
 	int i = 0 ;
 	int iByte = 0 ;
 	int iLocation = 0 ;
-	int iSection = -1 ;
+	int iSection = 0 ;
 	int j = 0 ;
 	int iTemp = 0 ;
 	int iCurrentLiteralCount = 0 ;
@@ -506,15 +516,10 @@ int iSetAddrNixbpeInfo ()
 
 	for ( ; i < g_iToken_count ; ++i )
 	{
-		if ( ( 0 == strcmp ( "START" , g_pToken_table [ i ] -> m_cpOperator ) )					// New section
-			|| ( 0 == strcmp ( "CSECT" , g_pToken_table [ i ] -> m_cpOperator ) ) )
+		if ( 0 == strcmp ( "CSECT" , g_pToken_table [ i ] -> m_cpOperator ) )			// New section
 		{
-			if ( 0 <= iSection )		// Save former section info
-			{
-				g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;
-				g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
-			}
-
+			g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;						// Save former section info
+			g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
 			g_iLocctr = 0 ;
 			++ iSection ;
 			iCurrentLiteralCount = 0 ;
@@ -587,7 +592,12 @@ int iSetAddrNixbpeInfo ()
 			}
 			else																		// Need find at symbol table
 			{
-				for ( j = 0 ; j < g_iSymbol_count ; ++j )
+				for ( j = 0 ; j < g_iSymbol_count ; ++j )								// Find current section
+				{
+					if ( iSection == g_Symbol_table [ j ] -> m_iSection )
+						break ;						
+				}
+				for ( ; ( j < g_iSymbol_count ) && ( iSection == g_Symbol_table [ j ] -> m_iSection ) ; ++j )
 				{
 					if ( ( ( '@' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )	// # or @ exist then need to process
 							|| ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] ) )
@@ -629,7 +639,7 @@ int iSetAddrNixbpeInfo ()
 					   && ( iLocation - g_iLocctr <= 2047 ) )						// If pc relative is possible
 			{
 				g_pToken_table [ i ] -> m_cNixbpe |= 0b000010 ;
-				g_pToken_table [ i ] -> m_iDisplacement = iLocation - g_iLocctr ;
+				g_pToken_table [ i ] -> m_iDisplacement = iLocation - g_iLocctr ;	// This is right for format 3
 			}
 			else																	// We already filtered format 4 extension
 			{																		// So if exceed condition failed, then base relative is the only way
@@ -679,6 +689,66 @@ int iSetAddrNixbpeInfo ()
 
 	g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;
 	g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
+
+
+	return 0 ;
+}
+
+/*
+ * Set displacement of operation except format 3
+ * Return 0 if success, - if fail
+ */
+int iSetDisplacement ()
+{
+	int i = 0 ;
+	int iByte = 0 ;
+	char crgTemp [ 50 ] = { 0 , } ;
+	char * cpTemp ;
+
+
+
+	for ( ; i < g_iToken_count ; ++i )
+	{
+		iByte = g_pToken_table [ i ] -> m_iByte ;
+
+		if ( 0 == iByte )
+			continue ;
+
+
+		if ( ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 0 ] )
+			&& ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )
+			&& ( '+' == g_pToken_table [ i ] -> m_cpOperator [ 0 ] ) )		// Immediate addressing, not format 4
+		{
+			g_pToken_table [ i ] -> m_iDisplacement = atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ;
+		}
+		else if ( ( 1 == iByte )				// For BYTE operation
+			&& ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "BYTE" ) ) )
+		{
+			strncpy ( crgTemp , g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 2 , 2 ) ;
+			crgTemp [ 2 ] = '\0' ;
+			g_pToken_table [ i ] -> m_iDisplacement = iStringToHex ( crgTemp ) ;
+		}
+		// else if ( ( 3 == iByte )				// For WORD operation
+		// 	&& ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "WORD" ) ) )
+		// {
+		// 	strncpy ( crgTemp , g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 2 , 2 ) ;
+		// 	crgTemp [ 2 ] = '\0' ;
+		// 	g_pToken_table [ i ] -> m_iDisplacement = iStringToHex ( crgTemp ) ;
+		// }
+		else if ( 2 == iByte )			// Format 2 operation
+		{
+			g_pToken_table [ i ] -> m_iDisplacement = iGetRegisterNum ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) << 4 ;
+
+			if ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 1 ] )
+			{
+				g_pToken_table [ i ] -> m_iDisplacement += iGetRegisterNum ( g_pToken_table [ i ] -> m_cpOperand [ 1 ] ) ;
+			}
+		}
+		else if ( 4 == iByte )
+		{
+			g_pToken_table [ i ] -> m_iDisplacement = 0 ;
+		}
+	}
 
 
 	return 0 ;
@@ -905,7 +975,21 @@ void tempSetSomething ()
 
  /*
   * Convert source to object program using all the info
+  * Infos are saved at object code table
+  * Return 0 if success, - if fail
+  */
+ int iConvertToObjectCode ()
+ {
+ 
+
+
+	 return 0 ;
+ }
+
+ /*
+  * Print object code to file
   * If parameter is NULL(don't save to file), then print to console
+  * If network connection is needed, make another function instead of this
   * Return 0 if success, - if fail
   */
  int iPrintObjectCode ( char * cpFile_name )
@@ -1131,6 +1215,30 @@ int iGetLitLocation ( char * cpStr )
 		}
 	}
 
+
+	return -1 ;
+}
+
+/*
+ * Find register number and return
+ * Return number of register, or - if not found
+ */
+int iGetRegisterNum ( char * cpStr )
+{
+	char cdrgReg [ 9 ] [ 3 ] = { "A" , "X" , "L" , "B" , "S" , "T" , "F" , "PC" , "SW" } ;	// Register name to check
+
+
+
+	for ( int i = 0 ; i < 9 ; ++i )
+	{
+		if ( 0 == strcmp ( cdrgReg [ i ] , cpStr ) )
+		{
+			if ( 7 <= i )
+				return i + 1 ;
+
+			return i ;
+		}
+	}
 
 	return -1 ;
 }
