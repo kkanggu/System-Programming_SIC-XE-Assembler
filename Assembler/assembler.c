@@ -373,6 +373,7 @@ int iSetSymbolLiteralInfo ()
 				iLen = 0 ;
 
 				g_Symbol_table [ g_iSymbol_count ] -> m_iAddr = 0 ;
+				g_Symbol_table [ g_iSymbol_count ] -> m_iByte = -1 ;				// EQU is like define
 
 				cpTemp = g_pToken_table [ i ] -> m_cpOperand [ 0 ] ;
 
@@ -385,7 +386,7 @@ int iSetSymbolLiteralInfo ()
 							strncpy ( crgLable , cpTemp + j - iLen , iLen ) ;
 							crgLable [ iLen ] = '\0' ;
 
-							g_Symbol_table [ g_iSymbol_count ] -> m_iAddr += iGetSymLocation ( crgLable ) * cSign ;
+							g_Symbol_table [ g_iSymbol_count ] -> m_iAddr += iGetSymLocation ( crgLable , iSection ) * cSign ;
 						}
 
 						cSign = -1 ;
@@ -403,7 +404,7 @@ int iSetSymbolLiteralInfo ()
 				strncpy ( crgLable , cpTemp + j - iLen , iLen ) ;			// Need to proceed last formula
 				crgLable [ iLen ] = '\0' ;
 
-				g_Symbol_table [ g_iSymbol_count ] -> m_iAddr += iGetSymLocation ( crgLable ) * cSign ;
+				g_Symbol_table [ g_iSymbol_count ] -> m_iAddr += iGetSymLocation ( crgLable , iSection ) * cSign ;
 			}
 
 			++ g_iSymbol_count ;
@@ -464,6 +465,7 @@ int iSetSymbolLiteralInfo ()
 				strcpy ( g_Literal_table [ g_iLiteral_count ] -> m_cpLiteral , cpTemp ) ;
 				g_Literal_table [ g_iLiteral_count ] -> m_iAddr = -1 ;
 				g_Literal_table [ g_iLiteral_count ] -> m_iByte = g_pToken_table [ i ] -> m_iByte ;
+				g_Literal_table [ g_iLiteral_count ] -> m_iSection = iSection ;
 				++ g_iLiteral_count ;
 			}
 		}
@@ -518,8 +520,8 @@ int iSetAddrNixbpeInfo ()
 	{
 		if ( 0 == strcmp ( "CSECT" , g_pToken_table [ i ] -> m_cpOperator ) )			// New section
 		{
-			g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;						// Save former section info
-			g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
+//			g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;						// Save former section info
+//			g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
 			g_iLocctr = 0 ;
 			++ iSection ;
 			iCurrentLiteralCount = 0 ;
@@ -527,7 +529,18 @@ int iSetAddrNixbpeInfo ()
 		
 		iByte = g_pToken_table [ i ] -> m_iByte ;
 
-		if ( '+' == g_pToken_table [ i ] -> m_cpOperator [ 0 ] )						// Format 4
+		if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "BYTE" ) )			// BYTE, WORD then nixbpe is not needed
+			|| ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "WORD" ) ) )
+		{
+			continue ;
+		}
+		else if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "RESB" ) )		// RESB, RESW then no need to print
+			|| ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "RESW" ) ) )
+		{
+			g_pToken_table [ i ] -> m_cNixbpe = -1 ;
+			continue ;
+		}
+		else if ( '+' == g_pToken_table [ i ] -> m_cpOperator [ 0 ] )					// Format 4
 		{
 			g_pToken_table [ i ] -> m_cNixbpe = 0b110001 ;
 		}
@@ -617,7 +630,7 @@ int iSetAddrNixbpeInfo ()
 
 				if ( -1 == iLocation )
 				{
-					iLocation = atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 1 ) ;
+					iLocation = 0 ;
 
 
 					// printf ( "iSetAddrNixbpeInfo : Can't find symbol\n" ) ;
@@ -663,12 +676,13 @@ int iSetAddrNixbpeInfo ()
 		}
 	}
 
-	iTemp = 0 ;
-	for ( i = 0 ; i < iSection + 1 ; ++i )
+
+	for ( i = 0 ; i < iTotalLiteralCount ; ++i )
 	{
-		iTemp += g_irgLiteralCountforEach [ i ] ;
+		if ( iSection == g_Literal_table [ i ] -> m_iSection )
+			break ;
 	}
-	for ( i = iTemp ; i < iTotalLiteralCount ; ++i )	// If literal address is not computed, then proceed for loop
+	for ( ; i < iTotalLiteralCount ; ++i )	// If literal address is not computed, then proceed for loop
 	{
 		iByte = 1 ;
 
@@ -687,8 +701,34 @@ int iSetAddrNixbpeInfo ()
 		return -1 ;
 	}
 
-	g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;
-	g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
+//	iTemp = 0 ;
+//	for ( i = 0 ; i < iSection + 1 ; ++i )
+//	{
+//		iTemp += g_irgLiteralCountforEach [ i ] ;
+//	}
+//	for ( i = iTemp ; i < iTotalLiteralCount ; ++i )	// If literal address is not computed, then proceed for loop
+//	{
+//		iByte = 1 ;
+//
+//		if ( 'C' == g_Literal_table [ i ] -> m_cpLiteral [ 1 ] )
+//		{
+//			iByte = strlen ( g_Literal_table [ i ] -> m_cpLiteral - 4 ) ;
+//		}
+//
+//		g_iLocctr = g_Literal_table [ i ] -> m_iAddr + iByte ;
+//	}
+//
+//	if ( -1 == iSection )
+//	{
+//		printf ( "iSetAddrNixbpeInfo : Section is -1." ) ;
+//
+//		return -1 ;
+//	}
+//
+//	g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;
+//	g_irgLiteralCountforEach [ iSection ] = iCurrentLiteralCount ;
+
+	
 
 
 	return 0 ;
@@ -701,9 +741,14 @@ int iSetAddrNixbpeInfo ()
 int iSetDisplacement ()
 {
 	int i = 0 ;
+	int j = 0 ;
 	int iByte = 0 ;
+	int iLen = 0 ;
+	int iTemp = 0 ;
 	char crgTemp [ 50 ] = { 0 , } ;
 	char * cpTemp ;
+	int iSection = 0 ;
+	char cSign = 1 ;
 
 
 
@@ -715,26 +760,71 @@ int iSetDisplacement ()
 			continue ;
 
 
-		if ( ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 0 ] )
-			&& ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )
-			&& ( '+' == g_pToken_table [ i ] -> m_cpOperator [ 0 ] ) )		// Immediate addressing, not format 4
-		{
-			g_pToken_table [ i ] -> m_iDisplacement = atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ;
-		}
-		else if ( ( 1 == iByte )				// For BYTE operation
-			&& ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "BYTE" ) ) )
+		if ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "BYTE" ) )		// BYTE operation
 		{
 			strncpy ( crgTemp , g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 2 , 2 ) ;
 			crgTemp [ 2 ] = '\0' ;
 			g_pToken_table [ i ] -> m_iDisplacement = iStringToHex ( crgTemp ) ;
 		}
-		// else if ( ( 3 == iByte )				// For WORD operation
-		// 	&& ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "WORD" ) ) )
-		// {
-		// 	strncpy ( crgTemp , g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 2 , 2 ) ;
-		// 	crgTemp [ 2 ] = '\0' ;
-		// 	g_pToken_table [ i ] -> m_iDisplacement = iStringToHex ( crgTemp ) ;
-		// }
+		else if ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "WORD" ) )	// WORD operation
+		{																			// Similar as EQU process, but process timing and target variable is different, so separate it
+			iLen = 0 ;
+			cpTemp = g_pToken_table [ i ] -> m_cpLabel ;			
+			g_pToken_table [ i ] -> m_iDisplacement = 0 ;
+
+			for ( j = 0 ; j < g_iSymbol_count ; ++j )
+			{
+				if ( ( 0 == strcmp ( cpTemp , g_Symbol_table [ j ] -> m_cpSymbol ) )
+					&& ( -1 != g_Symbol_table [ j ] -> m_iByte ) )					// Except EQU
+				{
+					iSection = g_Symbol_table [ j ] -> m_iSection ;
+					break ;
+				}
+			}
+
+			cpTemp = g_pToken_table [ i ] -> m_cpOperand [ 0 ] ;			
+
+			for ( j = 0 ; j < strlen ( cpTemp ) ; ++j )
+			{
+				if ( ( '-' == cpTemp [ j ] ) || ( '+' == cpTemp [ j ] ) )	// Need to proceed former formula
+				{
+					if ( 0 != j )
+					{
+						strncpy ( crgTemp , cpTemp + j - iLen , iLen ) ;
+						crgTemp [ iLen ] = '\0' ;
+
+						iTemp = iGetSymLocation ( crgTemp , iSection ) ;
+
+						if ( -1 != iTemp )
+							g_pToken_table [ i ] -> m_iDisplacement += iTemp * cSign ;
+					}
+
+					cSign = -1 ;
+					iLen = 0 ;
+
+					if ( '+' == cpTemp [ j ] )
+						cSign = 1 ;
+				}
+				else
+				{
+					++ iLen ;
+				}
+			}
+
+			strncpy ( crgTemp , cpTemp + j - iLen , iLen ) ;				// Need to proceed last formula
+			crgTemp [ iLen ] = '\0' ;
+
+			iTemp = iGetSymLocation ( crgTemp , iSection ) ;
+
+			if ( -1 != iTemp )
+				g_pToken_table [ i ] -> m_iDisplacement += iTemp * cSign;
+		}
+		else if ( ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 0 ] )
+			&& ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )
+			&& ( '+' == g_pToken_table [ i ] -> m_cpOperator [ 0 ] ) )		// Immediate addressing, not format 4
+		{
+			g_pToken_table [ i ] -> m_iDisplacement = atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ;
+		}
 		else if ( 2 == iByte )			// Format 2 operation
 		{
 			g_pToken_table [ i ] -> m_iDisplacement = iGetRegisterNum ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) << 4 ;
@@ -980,7 +1070,20 @@ void tempSetSomething ()
   */
  int iConvertToObjectCode ()
  {
- 
+	int i = 0 ;
+	int j = 0 ;
+	int iByte = 0 ;
+	int iSection = 0 ;
+
+
+
+	for ( i = 0 ; i < g_iToken_count ; ++i )
+	{
+		iByte = g_pToken_table [ i ] -> m_iByte ;
+
+//		if ( NULL != g_pToken_table [ i ] -)
+//		if ( 0 == iByte )
+	}
 
 
 	 return 0 ;
@@ -1175,24 +1278,45 @@ int iGetInstOperandNum ( const int ciOpcode )	// Get number of instruction opera
 
 /*
  * Find symbol address using cpStr
- * Former version use section number, but it's unnecessary
- * There are no same symbol at different section, so don't need to check section
+ * Need to use section number to compute symbol displacement
+ * If iSection is -1, check all symbol
  * Return address of symbol, or - if not found
  */
-int iGetSymLocation ( char * cpStr )
+int iGetSymLocation ( char * cpStr , int iSection )
 {
 	int i = 0 ;
+	
 
 
-
-	for ( ; i < g_iSymbol_count ; ++i )
+	if ( -1 == iSection )
 	{
-		if ( 0 == strcmp ( cpStr , g_Symbol_table [ i ] -> m_cpSymbol ) )
+		for ( ; i < g_iSymbol_count ; ++i )
 		{
-			return g_Symbol_table [ i ] -> m_iAddr ;
+			if ( 0 == strcmp ( cpStr , g_Symbol_table [ i ] -> m_cpSymbol ) )
+			{
+				return g_Symbol_table [ i ] -> m_iAddr ;
+			}
 		}
 	}
-	
+	else
+	{
+		for ( ; i < g_iSymbol_count ; ++i )
+		{
+			if ( iSection == g_Symbol_table [ i ] -> m_iSection )
+			{
+				break ;
+			}
+		}
+
+		for ( ; ( i < g_iSymbol_count ) && ( iSection == g_Symbol_table [ i ] -> m_iSection ) ; ++i )
+		{
+			if ( 0 == strcmp ( cpStr , g_Symbol_table [ i ] -> m_cpSymbol ) )
+			{
+				return g_Symbol_table [ i ] -> m_iAddr ;
+			}
+		}
+	}
+
 
 	return -1 ;
 }

@@ -50,7 +50,7 @@ typedef struct symbol_unit
 {
 	char * m_cpSymbol ;
 	int m_iAddr ;
-	int m_iByte ;
+	int m_iByte ;				// -1 then EQU
 	int m_iSection ;
 } symbol ;
 symbol * g_Symbol_table [ MAX_LINES ] ;
@@ -71,15 +71,15 @@ typedef struct literal_unit {
 	char * m_cpLiteral ;
 	int m_iAddr ;
 	int m_iByte ;
+	int m_iSection ;
 } USER_Literal ;		// literal keyword exist
 USER_Literal * g_Literal_table [ MAX_LINES ] ;
 int g_iLiteral_count ;
 
 int g_iLocctr ;
 
-int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
-int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
-
+// int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
+// int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
 /*
  * External reference info
@@ -106,6 +106,7 @@ typedef struct object_code_unit
 	int m_iByte ;
 	char * m_cpSymbol ;
 	char m_cSign ;
+	int m_iSection ;
 } object_code ;
 object_code * g_ObjectCode_table [ MAX_LINES ] ;
 int g_iObjectCode_count ;
