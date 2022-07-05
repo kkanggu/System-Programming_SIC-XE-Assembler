@@ -78,7 +78,7 @@ int g_iLiteral_count ;
 
 int g_iLocctr ;
 
-// int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
+int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
 // int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
 /*
@@ -86,9 +86,10 @@ int g_iLocctr ;
  */
 typedef struct extref_unit
 {
-	char * m_cpLiteral ;
+	char * m_cpLabel ;
 	int m_iAddr ;
-	int m_iHalf_byte ;
+	int m_iByte ;
+	bool m_bHalf_byte ;
 	char m_cSign ;
 } extref ;
 extref * g_Extref_table [ 100 ] ;
@@ -101,12 +102,13 @@ int g_iExtref_count ;
  */
 typedef struct object_code_unit
 {
-	char * m_cpRecord ;				// Head, Extdef, Extref, Text, Modification, End
-	int m_iAddr ;
+	char m_cRecord ;				// Head, Extdef, Extref, Text, Modification, End
+	int m_iCode ;
 	int m_iByte ;
 	char * m_cpSymbol ;
 	char m_cSign ;
 	int m_iSection ;
+	int m_iAddr ;
 } object_code ;
 object_code * g_ObjectCode_table [ MAX_LINES ] ;
 int g_iObjectCode_count ;
@@ -116,16 +118,15 @@ int init_assembler ( void ) ;
 int init_inst_table ( char * cpInst_file ) ;
 int init_input_file ( char * cpInput_file ) ;
 int token_parsing ( char * cpStr ) ;
-int search_opcode ( char * cpStr ) ;
 int assem_pass1 () ;
 int iSetByteOfToken () ;
 int iSetSymbolLiteralInfo () ;
 int iSetAddrNixbpeInfo () ;
 int iSetDisplacement () ;
-void tempSetSomething () ;
 int iConvertToObjectCode () ;
 int iPrintObjectCode ( char * cpFile_name ) ;
 
+int iSearch_opcode ( char * cpStr ) ;
 int iStringToHex ( char * cpStr ) ;				// Change string to hex
 char cHexToChar ( const int ciNum ) ;			// Change hex to char
 void clearMemory () ;							// Free all the memory
@@ -134,3 +135,6 @@ int iGetInstOperandNum ( const int ciOpcode ) ;	// Get number of instruction ope
 int iGetSymLocation ( char * cpStr ) ;
 int iGetLitLocation ( char * cpStr ) ;
 int iGetRegisterNum ( char * cpStr ) ;
+void addObjectCodeTableMember ( char cRecord , char * cpSymbol , int iSection ) ;
+void addExtrefTableMember ( char * cpLabel , int iAddr , int iByte , bool bIsHalf , char cSign ) ;
+int iGetInstObjectCode ( int iByte , int iOpcode , char cNixbpe , int iDisplacement ) ;

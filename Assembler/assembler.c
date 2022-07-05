@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <stdbool.h>
 
 #pragma warning ( disable : 4996 )
 
@@ -46,7 +47,7 @@ int init_assembler ( void )
 {
 	if ( ( init_inst_table ( "inst.data" ) ) < 0 )		// Read instruction file
 		return -1 ;
-	if ( ( init_input_file ( "input.txt" ) ) < 0 )	// Read assembly input
+	if ( ( init_input_file ( "input.txt" ) ) < 0 )		// Read assembly input
 		return -1 ;
 
 	return 0 ;
@@ -249,6 +250,8 @@ int token_parsing ( char * cpStr )
  */
 int assem_pass2 ()
 {
+	char * cpFile = "object_code.obj" ;
+
 	if ( ( iSetByteOfToken () ) < 0 )		// Set byte of each tokens
 	{
 		printf ( "iSetByteOfToken : Setting byte failed.\n" ) ;
@@ -270,11 +273,12 @@ int assem_pass2 ()
 		return -1 ;
 	}
 
-	// LTORG, 맨 마지막에 Literal 추가되는거 totable에 없으니 처리해야함
-	// output 만들때 modification 처리해야 함
-	// output 만드는 함수 하나, 이거를 내보내는 함수 하나로 분리하는게 나을 듯
 
-	tempSetSomething () ;
+	if ( ( iConvertToObjectCode () ) < 0 )			// Convert assembly to object code
+	{
+		printf ( "iConvertToObjectCode : Converting assembly to object code.\n" ) ;
+		return -1 ;
+	}
 
 	return 0 ;
 }
@@ -294,7 +298,7 @@ int iSetByteOfToken ()
 	for ( ; i < g_iToken_count ; ++i )
 	{
 		cpTemp = g_pToken_table [ i ] -> m_cpOperator ;
-		iOpcode = search_opcode ( cpTemp ) ;						// Get opcode
+		iOpcode = iSearch_opcode ( cpTemp ) ;						// Get opcode
 
 		if ( '+' == cpTemp [ 0 ] )									// Format 4
 		{
@@ -532,6 +536,7 @@ int iSetAddrNixbpeInfo ()
 		if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "BYTE" ) )			// BYTE, WORD then nixbpe is not needed
 			|| ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "WORD" ) ) )
 		{
+			g_pToken_table [ i ] -> m_cNixbpe = -1 ;
 			continue ;
 		}
 		else if ( ( 0 == strcmp ( g_pToken_table [ i ] -> m_cpOperator , "RESB" ) )		// RESB, RESW then no need to print
@@ -605,27 +610,14 @@ int iSetAddrNixbpeInfo ()
 			}
 			else																		// Need find at symbol table
 			{
-				for ( j = 0 ; j < g_iSymbol_count ; ++j )								// Find current section
+				if ( ( '@' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )			// # or @ exist then need to process
+						|| ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] ) )
 				{
-					if ( iSection == g_Symbol_table [ j ] -> m_iSection )
-						break ;						
+					iLocation = iGetSymLocation ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 1 , iSection ) ;
 				}
-				for ( ; ( j < g_iSymbol_count ) && ( iSection == g_Symbol_table [ j ] -> m_iSection ) ; ++j )
+				else
 				{
-					if ( ( ( '@' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] )	// # or @ exist then need to process
-							|| ( '#' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] ) )
-						&& ( 0 == strcmp ( g_Symbol_table [ j ] -> m_cpSymbol , g_pToken_table [ i ] -> m_cpOperand [ 0 ] + 1 ) ) )
-					{
-						iLocation = g_Symbol_table [ j ] -> m_iAddr ;
-
-						break ;
-					}
-					else if ( 0 == strcmp ( g_Symbol_table [ j ] -> m_cpSymbol , g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) )
-					{
-						iLocation = g_Symbol_table [ j ] -> m_iAddr ;
-
-						break ;
-					}
+					iLocation = iGetSymLocation ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] , iSection ) ;
 				}
 
 				if ( -1 == iLocation )
@@ -844,264 +836,347 @@ int iSetDisplacement ()
 	return 0 ;
 }
 
-/* ----------------------------------------------------------------------------------
- * 설명 : 입력된 문자열의 이름을 가진 파일에 프로그램의 결과를 저장하는 함수이다.
- * 여기서 출력되는 내용은 object code ( 프로젝트 1번 )이다.
- * 매계 : 생성할 오브젝트 파일명
- * 반환 : 없음
- * 주의 : 만약 인자로 NULL값이 들어온다면 프로그램의 결과를 표준출력으로 보내어
- * 화면에 출력해준다.
- * 
- * -----------------------------------------------------------------------------------
+/*
+ * Convert source to object program using all the info
+ * Infos are saved at object code table
+ * Return 0 if success, - if fail
  */
-void tempSetSomething ()
+int iConvertToObjectCode ()
 {
 	int i = 0 ;
 	int j = 0 ;
 	int k = 0 ;
-	int iTemp = 0 ;
+	int iByte = 0 ;
 	int iSection = -1 ;
-	int iByte = 0 ;
-	int iLineLength = 0 ;
-	int iAddress = 0 ;
-	int iImmediate = 0 ;
-	char crgTemp [ 20 ] = { 0 , } ;
+	int iLiteralFoundCount = 0 ;		// Count of found literal
+	int iLiteralAddCount = 0 ;			// Count of added literal
+	bool bHeadAdd = true ;
+	char cTemp ;
 	char * cpTemp ;
-	char cSign = 0 ;
-	int iWordLen = 0 ;
-	int iIndicator = 0 ;				// 0 Normal, 1 Byte, 2 Word, 3 LTORG
-	int iLiteralProcessCount = 0 ;
-	char * cprgExtrefList [ 10 ] ;		// Save string of EXTREF at current section
-	int iExtrefPointCount ;				// Count EXTREF at current section
-	g_iExtref_count = 0 ;
-
-
-
-	for ( ; i < g_iToken_count ; ++i )
-	{
-		if ( ( 0 == strcmp ( "START" , g_pToken_table [ i ] -> m_cpOperator ) )				// New section
-			|| ( 0 == strcmp ( "CSECT" , g_pToken_table [ i ] -> m_cpOperator ) ) )
-		{
-			g_iLocctr = 0 ;
-			++ iSection ;
-			g_iExtref_count = 0 ;
-			iExtrefPointCount = 0 ;
-		}
-		else if ( ( 0 != strcmp ( "EXTDEF" , g_pToken_table [ i ] -> m_cpOperator ) ) 
-			&& ( 0 == strcmp ( "EXTREF" , g_pToken_table [ i ] -> m_cpOperator ) ) )
-		{
-			iAddress = search_opcode ( g_pToken_table [ i ] -> m_cpOperator ) ;
-			iByte = g_pToken_table [ i ] -> m_iByte ;
-			g_iLocctr += iByte ;
-			iIndicator = 0 ;
-
-//			if ( iByte > 0 )
-//			{
-//				iIndicator = 0 ;
-//			}
-			if ( 0 == strcmp ( "BYTE" , g_pToken_table [ i ] -> m_cpOperator ) )
-			{
-				iIndicator = 1 ;
-			}
-			else if ( 0 == strcmp ( "WORD" , g_pToken_table [ i ] -> m_cpOperator ) )
-			{
-				iIndicator = 2 ;
-			}
-			else if ( 0 == strcmp ( "LTORG" , g_pToken_table [ i ] -> m_cpOperator ) )						// Assign literal
-			{
-//				iByte = 0 ;
-//
-//				if ( 0 != g_irgLiteralCountforEach [ iSection ] )
-//				{
-//					iByte = 0 ;
-//
-//
-//					for ( j = iLiteralProcessCount ; j < iLiteralProcessCount + g_irgLiteralCountforEach [ iSection ] ; ++j )
-//					{
-//						if ( 'X' == g_Literal_table [ j ] -> m_cpLiteral [ 1 ] )									// Current literal is byte
-//						{
-//							++ iByte ;
-//						}
-//						else																			// Current literal is word
-//						{
-//							iByte += strlen ( g_Literal_table [ j ] -> m_cpLiteral ) - 4 ;
-//						}
-//					}
-//
-//					g_iLocctr += iByte ;
-//					iIndicator = 3 ;
-//				}
-				iIndicator = 3 ;
-			}
-//			else if ( ( 0 == strcmp ( "RESW" , g_pToken_table [ i ] -> m_cpOperator ) )
-//				|| ( 0 == strcmp ( "RESB" , g_pToken_table [ i ] -> m_cpOperator ) ) )					// Assign space, don't generate object code
-//			{
-//				iByte = 1 ;
-//
-//				if ( 0 == strcmp ( "RESW" , g_pToken_table [ i ] -> m_cpOperator ) )
-//					iByte = 3 ;
-//
-//				iByte *= atoi ( g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ;
-//
-//
-//				g_iLocctr += iByte ;
-//
-//				iByte = 0 ;
-//			}
-			
-			if ( 0 < iByte )
-			{
-				for ( j = 0 ; ( NULL != g_pToken_table [ i ] -> m_cpOperand [ j ] ) && ( j < 3 ) ; ++j )		// Check if EXTREF is used
-				{
-					cpTemp = g_pToken_table [ i ] -> m_cpOperand [ j ] ;
-
-					if ( ( '#' == cpTemp [ 0 ] ) || ( '@' == cpTemp [ 0 ] ) )							// If #,@ exist, move pointer
-						++ cpTemp ;
-
-					for ( k = 0 ; k < iExtrefPointCount ; ++k )
-					{
-						if ( 0 == strcmp ( cpTemp , cprgExtrefList [ k ] ) )
-						{
-							g_Extref_table [ g_iExtref_count ] -> m_cpLiteral = cprgExtrefList [ k ] ;
-							g_Extref_table [ g_iExtref_count ] -> m_iAddr = g_iLocctr - iByte ;
-
-							if ( 2 == iIndicator )
-							{
-								g_Extref_table [ g_iExtref_count ] -> m_iHalf_byte = 6 ;
-							}
-							else
-							{
-								g_Extref_table [ g_iExtref_count ] -> m_iHalf_byte = 5 ;
-							}
-
-							g_Extref_table [ g_iExtref_count ++ ] -> m_cSign = 1 ;
-
-							break ;
-						}
-					}
-
-					if ( ( NULL != strchr ( cpTemp , '+' ) ) || ( NULL != strchr ( cpTemp , '-' ) ) )	// WORD instruction, arithmetic
-					{
-						iWordLen = 0 ;
-						cSign = 1 ;
-
-						for ( iTemp = 0 ; iTemp < strlen ( cpTemp ) ; ++ iTemp )
-						{
-							if ( '-' == cpTemp [ iTemp ] )
-							{
-								if ( 0 != iTemp )
-								{
-									strncpy ( crgTemp , cpTemp + iTemp - iWordLen , iWordLen ) ;
-									crgTemp [ iWordLen ] = '\0' ;
-																
-									for ( k = 0 ; k < iExtrefPointCount ; ++k )
-									{
-										if ( 0 == strcmp ( crgTemp , cprgExtrefList [ k ] ) )
-										{
-											g_Extref_table [ g_iExtref_count ] -> m_cpLiteral = cprgExtrefList [ k ] ;
-											g_Extref_table [ g_iExtref_count ] -> m_iAddr = g_iLocctr - iByte ;
-											g_Extref_table [ g_iExtref_count ] -> m_iHalf_byte = 6 ;
-											g_Extref_table [ g_iExtref_count ++ ] -> m_cSign = cSign ;
-
-											break ;
-										}
-									}
-								}
-
-								cSign = -1 ;
-								iWordLen = 0 ;
-							}
-							else if ( '+' == cpTemp [ iTemp ] )
-							{
-								if ( 0 != iTemp )
-								{
-									strncpy ( crgTemp , cpTemp + iTemp - iWordLen , iWordLen ) ;
-									crgTemp [ iWordLen ] = '\0' ;
-																
-									for ( k = 0 ; k < iExtrefPointCount ; ++k )
-									{
-										if ( 0 == strcmp ( crgTemp , cprgExtrefList [ k ] ) )
-										{
-											g_Extref_table [ g_iExtref_count ] -> m_cpLiteral = cprgExtrefList [ k ] ;
-											g_Extref_table [ g_iExtref_count ] -> m_iAddr = g_iLocctr - iByte ;
-											g_Extref_table [ g_iExtref_count ] -> m_iHalf_byte = 6 ;
-											g_Extref_table [ g_iExtref_count ++ ] -> m_cSign = cSign ;
-
-											break ;
-										}
-									}
-								}
-
-								cSign = 1 ;
-								iWordLen = 0 ;
-							}
-							else
-							{
-								++ iWordLen ;
-							}
-						}
-
-						strncpy ( crgTemp , cpTemp + iTemp - iWordLen , iWordLen ) ;
-						crgTemp [ iWordLen ] = '\0' ;
-
-						for ( k = 0 ; k < iExtrefPointCount ; ++k )
-						{
-							if ( 0 == strcmp ( crgTemp , cprgExtrefList [ k ] ) )
-							{
-								g_Extref_table [ g_iExtref_count ] -> m_cpLiteral = cprgExtrefList [ k ] ;
-								g_Extref_table [ g_iExtref_count ] -> m_iAddr = g_iLocctr - iByte ;
-								g_Extref_table [ g_iExtref_count ] -> m_iHalf_byte = 6 ;
-								g_Extref_table [ g_iExtref_count ++ ] -> m_cSign = cSign ;
-
-								break ;
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
- /*
-  * Convert source to object program using all the info
-  * Infos are saved at object code table
-  * Return 0 if success, - if fail
-  */
- int iConvertToObjectCode ()
- {
-	int i = 0 ;
-	int j = 0 ;
-	int iByte = 0 ;
-	int iSection = 0 ;
-
+	g_iLocctr = 0 ;
+	int iLen = 0 ;
+	char crgLable [ 20 ] = { 0 , } ;
+	char cSign = 1 ;
 
 
 	for ( i = 0 ; i < g_iToken_count ; ++i )
 	{
 		iByte = g_pToken_table [ i ] -> m_iByte ;
 
-//		if ( NULL != g_pToken_table [ i ] -)
-//		if ( 0 == iByte )
+		if ( ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 0 ] )							// If LTORG, need to add literal
+			&& ( 0 == strcmp ( "LTORG" , g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) ) )
+		{
+			for ( j = iLiteralAddCount ; j < iLiteralFoundCount ; ++j )
+			{
+				addObjectCodeTableMember ( 'T' , g_Literal_table [ j ] -> m_cpLiteral , iSection ) ;
+				g_ObjectCode_table [ g_iObjectCode_count ] -> m_iCode = g_pToken_table [ i ] -> m_iDisplacement ;
+				g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_pToken_table [ i ] -> m_iByte ;
+				g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_iLocctr ;
+
+				++ iLiteralAddCount ;
+				g_iLocctr += g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+			}
+		}
+		else if ( ( bHeadAdd ) && ( NULL != g_pToken_table [ i ] -> m_cpLabel )				// Need to add Head record
+			&& ( 0 == iGetSymLocation ( g_pToken_table [ i ] -> m_cpLabel , iSection ) ) )
+		{
+			if ( iLiteralFoundCount != iLiteralAddCount )									// Literals need to be assigned
+			{
+				for ( j = iLiteralAddCount ; j < iLiteralFoundCount ; ++j )
+				{
+					addObjectCodeTableMember ( 'T' , g_Literal_table [ j ] -> m_cpLiteral , iSection ) ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iCode = g_Literal_table [ j ] -> m_iAddr ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_Literal_table [ j ] -> m_iByte ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_iLocctr ;
+					
+					++ iLiteralAddCount ;
+					g_iLocctr += g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+				}
+			}
+			if ( 0 != g_iExtref_count )														// Modification record
+			{
+				for ( j = 0 ; j < g_iExtref_count ; --j )
+				{
+					addObjectCodeTableMember ( 'M' , g_Extref_table [ j ] -> m_cpLabel , iSection ) ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_Extref_table [ j ] -> m_iAddr ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_Extref_table [ j ] -> m_iByte ;
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_cSign = g_Extref_table [ j ] -> m_cSign ;
+					
+					if ( g_Extref_table [ j ] -> m_bHalf_byte )								// If true, then half byte
+						-- g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+				}
+				for ( j = 0 ; j < g_iExtref_count ; --j )
+				{
+					free ( g_Extref_table [ j ] -> m_cpLabel ) ;
+					free ( g_Extref_table [ j ] ) ;
+				}
+
+				g_iExtref_count = 0 ;
+			}
+			if ( -1 != iSection )															// Not first program, then need to add End record
+			{
+				addObjectCodeTableMember ( 'E' , NULL , iSection ) ;
+				g_irgProgramLengthforEach [ iSection ] = g_iLocctr ;
+			}
+
+			++ iSection ;
+			g_iLocctr = 0 ;
+
+			addObjectCodeTableMember ( 'H' , g_pToken_table [ i ] -> m_cpLabel , iSection ) ;
+
+			bHeadAdd = false ;
+		}
+		else if ( ( NULL != g_pToken_table [ i ] -> m_cpOperator )							// Extdef && Extref
+			&& ( 0 == strncmp ( "EXT" , g_pToken_table [ i ] -> m_cpOperator , 3 ) ) )
+		{
+			if ( 'D' == g_pToken_table [ i ] -> m_cpOperator [ 3 ] )
+				cTemp = 'D' ;
+			else
+				cTemp = 'R' ;
+
+			for ( j = 0 ; j < MAX_OPERAND ; ++j )
+			{
+				if ( NULL == g_pToken_table [ i ] -> m_cpOperand [ j ] )
+					break ;
+				
+				addObjectCodeTableMember ( cTemp , g_pToken_table [ i ] -> m_cpOperand [ j ] , iSection ) ;
+
+				if ( 'D' == cTemp )
+				{
+					g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = iGetSymLocation ( g_ObjectCode_table [ g_iObjectCode_count ] -> m_cpSymbol , iSection ) ;
+				}
+			}
+		}
+		else if ( 0 != iByte )
+		{
+			addObjectCodeTableMember ( 'T' , NULL , iSection ) ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iCode = iGetInstObjectCode ( g_pToken_table [ i ] -> m_iByte ,
+				iSearch_opcode ( g_pToken_table [ i ] -> m_cpOperator ) , g_pToken_table [ i ] -> m_cNixbpe , g_pToken_table [ i ] -> m_iDisplacement ) ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_pToken_table [ i ] -> m_iByte ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_iLocctr ;
+
+			if ( ( NULL != g_pToken_table [ i ] -> m_cpOperand [ 0 ] ) && ( '=' == g_pToken_table [ i ] -> m_cpOperand [ 0 ] [ 0 ] ) )
+			{
+				++ iLiteralFoundCount ;
+			}
+
+			for ( j = 0 ; j < MAX_OPERAND ; ++j )			// Find external reference for processing modification record
+			{
+				cpTemp = g_pToken_table [ i ] -> m_cpOperand [ j ] ;
+				cSign = 1 ;
+
+				if ( NULL == cpTemp )
+					break ;
+
+				if ( ( '#' == cpTemp [ 0 ] ) || ( '@' == cpTemp [ 0 ] ) || ( '=' == cpTemp [ 0 ] ) )		// Except unnecessary symbol
+				{
+					if ( -1 == iGetSymLocation ( cpTemp + 1 , iSection ) )
+					{
+						addExtrefTableMember ( cpTemp + 1 , g_iLocctr , iByte , ( -1 != g_pToken_table [ i ] -> m_cNixbpe ) , cSign ) ;
+					}
+				}
+				else																	// Separate formula and process
+				{
+					iLen = 0 ;
+
+					for ( k = 0 ; k < strlen ( cpTemp ) ; ++k )
+					{
+						if ( ( '-' == cpTemp [ k ] ) || ( '+' == cpTemp [ k ] ) )		// Need to proceed former formula
+						{
+							if ( 0 != k )
+							{
+								strncpy ( crgLable , cpTemp + j - iLen , iLen ) ;
+								crgLable [ iLen ] = '\0' ;
+
+								addExtrefTableMember ( crgLable , g_iLocctr , iByte , ( -1 != g_pToken_table [ i ] -> m_cNixbpe ) , cSign ) ;
+							}
+
+							cSign = -1 ;
+							iLen = 0 ;
+
+							if ( '+' == cpTemp [ j ] )
+								cSign = 1 ;
+						}
+						else
+						{
+							++ iLen ;
+						}
+					}
+
+					strncpy ( crgLable , cpTemp + j - iLen , iLen ) ;			// Need to proceed last formula
+					crgLable [ iLen ] = '\0' ;
+
+					addExtrefTableMember ( crgLable , g_iLocctr , iByte , ( -1 != g_pToken_table [ i ] -> m_cNixbpe ) , cSign ) ;
+				}
+			}
+
+			bHeadAdd = true ;
+			g_iLocctr += g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+		}
+	}
+
+	if ( iLiteralFoundCount != g_iLiteral_count )	// If some literals are missing
+	{
+		printf ( "iConvertToObjectCode : Some literals are missing\n" ) ;
+
+		return -1 ;
+	}
+	if ( iLiteralAddCount != g_iLiteral_count )		// Program end without adding last literal, so need to add literals
+	{
+		for ( j = iLiteralAddCount ; j < iLiteralFoundCount ; ++j )
+		{
+			addObjectCodeTableMember ( 'T' , g_Literal_table [ j ] -> m_cpLiteral , iSection ) ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iCode = g_Literal_table [ j ] -> m_iAddr ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_Literal_table [ j ] -> m_iByte ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_iLocctr ;
+
+			++ iLiteralAddCount ;
+			g_iLocctr += g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+		}
+	}
+
+	if ( 0 != g_iExtref_count )														// Modification record
+	{
+		for ( j = 0 ; j < g_iExtref_count ; --j )
+		{
+			addObjectCodeTableMember ( 'M' , g_Extref_table [ j ] -> m_cpLabel , iSection ) ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = g_Extref_table [ j ] -> m_iAddr ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = g_Extref_table [ j ] -> m_iByte ;
+			g_ObjectCode_table [ g_iObjectCode_count ] -> m_cSign = g_Extref_table [ j ] -> m_cSign ;
+					
+			if ( g_Extref_table [ j ] -> m_bHalf_byte )								// If true, then half byte
+				-- g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte ;
+		}
+		for ( j = 0 ; j < g_iExtref_count ; --j )
+		{
+			free ( g_Extref_table [ j ] -> m_cpLabel ) ;
+			free ( g_Extref_table [ j ] ) ;
+		}
+
+		g_iExtref_count = 0 ;
+	}
+
+	addObjectCodeTableMember ( 'E' , NULL , iSection ) ;
+
+	
+	return 0 ;
+}
+
+/*
+ * Print object code to file
+ * If parameter is NULL(don't save to file), then print to console
+ * If network connection is needed, make another function instead of this
+ * Return 0 if success, - if fail
+ */
+int iPrintObjectCode ( char * cpFile_name )
+{
+	int iByte = 0 ;
+	char crgPrint [ 100 ] ;
+	FILE * fpOut ;
+	int i = 0 ;
+	int iSection = -1 ;
+
+
+
+	if ( NULL == fopen ( cpFile_name , "w+" ) )
+	{
+		printf ( "iPrintObjectCode : Can't open the file\n" ) ;
+
+		return -1 ;
+	}
+
+	for ( ; i < g_iObjectCode_count ; ++i )
+	{
+		if ( ( '\0' != crgPrint [ 0 ] ) && ( crgPrint [ 0 ] != g_ObjectCode_table [ i ] -> m_cRecord ) )		// If former record remain at crgPrint, then print
+		{
+			if ( ' ' == crgPrint [ strlen ( crgPrint ) - 1 ] )
+				crgPrint [ strlen ( crgPrint ) - 1 ] = '\0 ' ;
+
+			fprintf ( fpOut , "%s\n" , crgPrint ) ;
+			crgPrint [ 0 ] = '\0' ;
+		}
+
+
+		if ( 'H' == g_ObjectCode_table [ i ] -> m_cRecord )				// Head record
+		{
+			sprintf ( crgPrint , "H%s %06X %06X" , g_ObjectCode_table [ i ] -> m_cpSymbol , 0 , g_irgProgramLengthforEach [ ++ iSection ] ) ;
+
+			fprintf ( fpOut , "%s\n" , crgPrint ) ;
+
+			crgPrint [ 0 ] = '\0' ;
+		}
+		else if ( 'D' == g_ObjectCode_table [ i ] -> m_cRecord )		// Extdef record
+		{
+			if ( '\0' == crgPrint [ 0 ] )
+				sprintf ( crgPrint , "D" ) ;
+
+
+			sprintf ( crgPrint , "%s %06X " , g_ObjectCode_table [ i ] -> m_cpSymbol , g_ObjectCode_table [ i ] -> m_iAddr ) ;
+		}
+		else if ( 'R' == g_ObjectCode_table [ i ] -> m_cRecord )		// Extref record
+		{
+			if ( '\0' == crgPrint [ 0 ] )
+				sprintf ( crgPrint , "R" ) ;
+			
+
+			sprintf ( crgPrint , "%s " , g_ObjectCode_table [ i ] -> m_cpSymbol ) ;
+		}
+		else if ( 'T' == g_ObjectCode_table [ i ] -> m_cRecord )		// Text record
+		{
+			if ( 32 <= iByte + g_ObjectCode_table [ i ] -> m_iByte )
+			{
+				crgPrint [ strlen ( crgPrint ) - 1 ] = '\0 ' ;
+
+				fprintf ( fpOut , "%s\n" , crgPrint ) ;
+
+				crgPrint [ 0 ] = '\0' ;
+				iByte = 0 ;
+			}
+			if ( '\0' == crgPrint [ 0 ] )
+				sprintf ( crgPrint , "T %06X %02X " , g_ObjectCode_table [ i ] -> m_iAddr , 0 ) ;
+			
+
+			if ( 1 == g_ObjectCode_table [ i ] -> m_iByte )
+				sprintf ( crgPrint , "%02X " , g_ObjectCode_table [ i ] -> m_iCode ) ;
+			else if ( 2 == g_ObjectCode_table [ i ] -> m_iByte )
+				sprintf ( crgPrint , "%04X " , g_ObjectCode_table [ i ] -> m_iCode ) ;
+			else if ( 3 == g_ObjectCode_table [ i ] -> m_iByte )
+				sprintf ( crgPrint , "%06X " , g_ObjectCode_table [ i ] -> m_iCode ) ;
+			else if ( 4 == g_ObjectCode_table [ i ] -> m_iByte )
+				sprintf ( crgPrint , "%08X " , g_ObjectCode_table [ i ] -> m_iCode ) ;
+
+			iByte += g_ObjectCode_table [ i ] -> m_iByte ;
+
+			crgPrint [ 9 ] = cHexToChar ( iByte / 16 ) ;
+			crgPrint [ 10 ] = cHexToChar ( iByte % 16 ) ;
+
+
+			fprintf ( fpOut , "%s\n" , crgPrint ) ;
+		}
+		else if ( 'M' == g_ObjectCode_table [ i ] -> m_cRecord )		// Modification record
+		{
+			sprintf ( crgPrint , "M %06X %02X %c%s" , g_ObjectCode_table [ i ] -> m_iAddr , g_ObjectCode_table [ i ] -> m_iByte ,
+				( 1 == g_ObjectCode_table [ i ] -> m_cSign ) ? '+' : '-' , g_ObjectCode_table [ i ] -> m_cpSymbol ) ;
+
+			fprintf ( fpOut , "%s\n" , crgPrint ) ;
+		}
+		else if ( 'E' == g_ObjectCode_table [ i ] -> m_cRecord )		// End record
+		{
+			sprintf ( crgPrint , "E" ) ;
+
+			if ( 0 == iSection )
+			{
+				sprintf ( crgPrint , " %06X" , 0 ) ;
+			}
+
+			fprintf ( fpOut , "%s\n" , crgPrint ) ;
+		}
 	}
 
 
-	 return 0 ;
- }
 
- /*
-  * Print object code to file
-  * If parameter is NULL(don't save to file), then print to console
-  * If network connection is needed, make another function instead of this
-  * Return 0 if success, - if fail
-  */
- int iPrintObjectCode ( char * cpFile_name )
- {
- 
-
-
-	 return 0 ;
- }
+	return 0 ;
+}
 
 
 
@@ -1117,7 +1192,7 @@ void tempSetSomething ()
  * Check whether cpStr is operation or not
  * Return opcode, or - if fail
  */
-int search_opcode ( char * cpStr )
+int iSearch_opcode ( char * cpStr )
 {
 	int i = 0 ;
 	char * cpTemp = cpStr ;
@@ -1172,22 +1247,25 @@ char cHexToChar ( const int ciNum )				// Change hex to char
 	return cReturn ;
 }
 
+/*
+ * Free allocated memory
+ * If this program need too many memories, then split this function and use early
+ */
 void clearMemory ()								// Free all the memory
 {
-	int iCount = 0 ;
 	int i = 0 ;
 	int j = 0 ;
 
 
 	for ( i = 0 ; ( i < MAX_INST ) && ( NULL != g_pInst_table [ i ] ) ; ++i )
 	{
-		free ( g_pInst_table [ iCount ] -> m_cpOperation ) ;
-		free ( g_pInst_table [ iCount ++ ] ) ;
+		free ( g_pInst_table [ i ] -> m_cpOperation ) ;
+		free ( g_pInst_table [ i ] ) ;
 	}
 
 	for ( int i = 0 ; i < g_iLine_count ; ++i )
 	{
-		free ( g_cpInput_data [ iCount ++ ] ) ;
+		free ( g_cpInput_data [ i ] ) ;
 	}
 	
 	for ( i = 0 ; ( i < MAX_LINES ) && ( NULL != g_pToken_table [ i ] ) ; ++i )
@@ -1206,8 +1284,6 @@ void clearMemory ()								// Free all the memory
 		}
 
 		free ( g_pToken_table [ i ] ) ;
-
-		iCount = 0 ;
 	}
 
 	for ( int i = 0 ; i < g_iSymbol_count ; ++i )
@@ -1220,6 +1296,15 @@ void clearMemory ()								// Free all the memory
 	{
 		free ( g_Literal_table [ i ] -> m_cpLiteral ) ;
 		free ( g_Literal_table [ i ] ) ;
+	}
+
+	// Already free Extref table at iConvertToObjectCode
+
+	for ( int i = 0 ; i < g_iObjectCode_count ; ++i )
+	{
+		free ( g_ObjectCode_table [ i ] -> m_cRecord ) ;
+		free ( g_ObjectCode_table [ i ] -> m_cpSymbol ) ;
+		free ( g_ObjectCode_table [ i ] ) ;
 	}
 }
 
@@ -1362,6 +1447,81 @@ int iGetRegisterNum ( char * cpStr )
 
 			return i ;
 		}
+	}
+
+	return -1 ;
+}
+
+/*
+ * Add one member to object code table
+ */
+void addObjectCodeTableMember ( char cRecord , char * cpSymbol , int iSection )
+{
+	g_ObjectCode_table [ g_iObjectCode_count ] = malloc ( sizeof ( object_code ) ) ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_cRecord = cRecord ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_iCode = 0 ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_iByte = 0 ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_cpSymbol = NULL ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_cSign = 0 ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_iSection = iSection ;
+	g_ObjectCode_table [ g_iObjectCode_count ] -> m_iAddr = 0 ;
+
+
+
+	if ( NULL != cpSymbol )
+	{
+		g_ObjectCode_table [ g_iObjectCode_count ] -> m_cpSymbol = malloc ( sizeof ( char ) * ( strlen ( cpSymbol ) + 1 ) ) ;
+		strcpy ( g_ObjectCode_table [ g_iObjectCode_count ] -> m_cpSymbol , cpSymbol ) ;
+	}
+
+	++ g_iObjectCode_count ;
+}
+
+/*
+ * Add one member to extref table
+ */
+void addExtrefTableMember ( char * cpLabel , int iAddr , int iByte , bool bIsHalf , char cSign )
+{
+	g_Extref_table [ g_iExtref_count ] = malloc ( sizeof ( extref ) ) ;
+	g_Extref_table [ g_iExtref_count ] -> m_cpLabel = malloc ( strlen ( cpLabel ) + 1 ) ;
+	strcpy ( g_Extref_table [ g_iExtref_count ] -> m_cpLabel , cpLabel ) ;
+	g_Extref_table [ g_iExtref_count ] -> m_iAddr = iAddr ;
+	g_Extref_table [ g_iExtref_count ] -> m_iByte = iByte ;
+	g_Extref_table [ g_iExtref_count ] -> m_bHalf_byte = bIsHalf ;
+	g_Extref_table [ g_iExtref_count ++ ] -> m_cSign = cSign ;
+}
+
+/*
+ * Get object code of information
+ * If cNixbpe == -1, then BYTE or WORD
+ * Return object code of information, or - if wrong information
+ */
+int iGetInstObjectCode ( int iByte , int iOpcode , char cNixbpe , int iDisplacement )
+{
+	int iReturn = 0 ;
+
+	
+	
+	if ( -1 == cNixbpe )
+	{
+		return iDisplacement ;
+	}
+
+	if ( 1 == iByte )
+	{
+		return iOpcode ;
+	}
+	if ( 2 == iByte )
+	{
+		return ( iOpcode << 8 ) + iDisplacement ;
+	}
+	if ( 3 == iByte )
+	{
+		return ( iOpcode << 16 ) + ( cNixbpe << 12 ) + ( iDisplacement & 0xFFF ) ;		// If displacement is -, then cut bit
+	}
+	if ( 4 == iByte )
+	{
+		return ( iOpcode << 24 ) + ( cNixbpe << 20 ) + ( iDisplacement & 0xFFFFF ) ;	// If displacement is -, then cut bit
 	}
 
 	return -1 ;
