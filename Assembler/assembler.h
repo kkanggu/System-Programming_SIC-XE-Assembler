@@ -79,7 +79,6 @@ int g_iLiteral_count ;
 int g_iLocctr ;
 
 int g_irgProgramLengthforEach [ MAX_SECTION ] ;	// Program length of each section | routine
-// int g_irgLiteralCountforEach [ MAX_SECTION ] ;	// Literal counts of each section | routine
 
 /*
  * External reference info
@@ -127,14 +126,14 @@ int iConvertToObjectCode () ;
 int iPrintObjectCode ( char * cpFile_name ) ;
 
 int iSearch_opcode ( char * cpStr ) ;
-int iStringToHex ( char * cpStr ) ;				// Change string to hex
-char cHexToChar ( const int ciNum ) ;			// Change hex to char
-void clearMemory () ;							// Free all the memory
-int iGetOperandByte ( const int ciOpcode ) ;	// Get operand size using opcode
-int iGetInstOperandNum ( const int ciOpcode ) ;	// Get number of instruction operand using opcode
-int iGetSymLocation ( char * cpStr ) ;
+int iHexStringToInt ( char * cpStr , int iByte , bool bASCII ) ;
+char cIntToHexChar ( const int ciNum ) ;
+void clearMemory () ;
+int iGetOperandSize ( const int ciOpcode ) ;
+int iGetSymLocation ( char * cpStr , int iSection ) ;
 int iGetLitLocation ( char * cpStr ) ;
 int iGetRegisterNum ( char * cpStr ) ;
 void addObjectCodeTableMember ( char cRecord , char * cpSymbol , int iSection ) ;
 void addExtrefTableMember ( char * cpLabel , int iAddr , int iByte , bool bIsHalf , char cSign ) ;
 int iGetInstObjectCode ( int iByte , int iOpcode , char cNixbpe , int iDisplacement ) ;
+bool bIsConstNumber ( char * cpStr ) ;
