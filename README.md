@@ -1,6 +1,6 @@
 # System Programming SIC/XE Assembler 
 SIC/XE Assembler implementation  
-Project proceed by "System Programming" at Soongsil Univ. 4-1
+Project proceed by "System Programming" at Soongsil Univ. 4-1  
 [Project Review](https://kkanggu39.tistory.com/31)
 
 
