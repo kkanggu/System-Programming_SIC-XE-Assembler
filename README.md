@@ -1,6 +1,7 @@
 # System Programming SIC/XE Assembler 
 SIC/XE Assembler implementation  
 Project proceed by "System Programming" at Soongsil Univ. 4-1
+[Project Review](https://kkanggu39.tistory.com/31)
 
 
 
@@ -24,11 +25,11 @@ Or wanna change file format, change only `iPrintObjectCode` function
 ### GUI Simulator 
 Implement GUI simulator using `Java`  
 Instruction information is at `inst.data`  
-Read object program with `out_20162438.obj`  
+Read object program with `output.obj`  
 Former program convert `F1` file to `05` file with adding `EOF`
 
 Structure of this program is not so bad, so I'm not gonna refactoring this simulator  
-So output of `Assembler`, `object_code.obj` is different from `out_20162438.obj`  
+So output of `Assembler`, `object_code.obj` is different from `output.obj`  
 
 
 
